@@ -3,12 +3,13 @@ import sys
 
 # Yüklenmesi gereken paketler
 packages = [
-    "flask",
-    "flask-cors",
-    "matplotlib",
-    "seaborn",
-    "scikit-learn",
-    "pandas"
+    # "flask",
+    # "flask-cors",
+    # "matplotlib",
+    # "seaborn",
+    # "scikit-learn",
+    # "pandas"
+    "tensorflow",
 ]
 
 # Her paketi tek tek yükle

@@ -1,11 +1,10 @@
-# app.py
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import uuid
 import pandas as pd
 from iris_analysis import analyze_iris
+from titanic_analysis import analyze_titanic  # Yeni analiz fonksiyonunu ekle
 
 app = Flask(__name__)
 CORS(app)
@@ -19,10 +18,12 @@ def analyze():
     file.save(filepath)
 
     df = pd.read_csv(filepath)
-    
-    # Örnek olarak Iris dataset kontrolü
+
+    # Hangi analiz fonksiyonu kullanılacak?
     if set(['Id', 'Species']).issubset(df.columns):
         plot_paths = analyze_iris(filepath)
+    elif set(['Survived', 'Sex', 'Age', 'Fare']).issubset(df.columns):  # Titanic için basit kontrol
+        plot_paths = analyze_titanic(filepath)
     else:
         return jsonify({"status": "error", "message": "Unsupported dataset"}), 400
 
