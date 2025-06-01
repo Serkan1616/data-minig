@@ -1,154 +1,139 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 import os
+from sklearn.metrics import recall_score
+from sklearn.metrics import precision_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
 from sklearn.semi_supervised import SelfTrainingClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDisplay
-import random
+
+def preprocess_titanic(df):
+    df = df[['Survived', 'Pclass', 'Sex', 'Age', 'Fare']].copy()
+    df.dropna(inplace=True)
+    df['Sex'] = LabelEncoder().fit_transform(df['Sex'])  # male=1, female=0
+    X = df.drop('Survived', axis=1)
+    y = df['Survived']
+    return X, y
+
+def run_experiment(X, y, label_ratio):
+    if label_ratio < 1.0:
+        X_labeled, X_unlabeled, y_labeled, y_unlabeled = train_test_split(
+            X, y, train_size=label_ratio, stratify=y, random_state=42
+        )
+        X_train_full = pd.concat([X_labeled, X_unlabeled])
+        y_train_full = pd.concat([y_labeled, y_unlabeled])
+    else:
+        # 100% etiketli veri: hepsi labeled
+        X_labeled = X.copy()
+        y_labeled = y.copy()
+        X_train_full = X.copy()
+        y_train_full = y.copy()
+
+    # Ortak test seti oluştur (verinin %20'si)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_train_full, y_train_full, test_size=0.4, stratify=y_train_full, random_state=42
+    )
+
+    # 1. Supervised model
+    clf_supervised = RandomForestClassifier(random_state=42)
+    clf_supervised.fit(X_labeled, y_labeled)
+    y_pred_supervised = clf_supervised.predict(X_test)
+
+    # 2. Semi-supervised model
+    y_semi = y_train.copy()
+    if label_ratio < 1.0:
+        # Sadece labeled kısmı bilinsin, diğerleri -1 olarak maskelensin
+        y_semi.iloc[len(X_labeled):] = -1
+
+    base_model = RandomForestClassifier(random_state=42)
+    semi_clf = SelfTrainingClassifier(base_model)
+    semi_clf.fit(X_train, y_semi)
+    y_pred_semi = semi_clf.predict(X_test)
+    supervised_prec = precision_score(y_test, y_pred_supervised)
+
+    # 3. Değerlendirme
+    supervised_f1 = f1_score(y_test, y_pred_supervised)
+    semi_f1 = f1_score(y_test, y_pred_semi)
+    supervised_acc = accuracy_score(y_test, y_pred_supervised)
+    semi_acc = accuracy_score(y_test, y_pred_semi)
+    semi_prec = precision_score(y_test, y_pred_semi)
+    supervised_recall = recall_score(y_test, y_pred_supervised)
+    semi_recall = recall_score(y_test, y_pred_semi)
+
+    return {
+        'label_ratio': label_ratio,
+        'supervised_f1': supervised_f1,
+        'semi_f1': semi_f1,
+        'supervised_acc': supervised_acc,
+        'semi_acc': semi_acc,
+        'semi_prec': semi_prec,
+'supervised_prec': supervised_prec,
+ 'supervised_recall': supervised_recall,
+    'semi_recall': semi_recall
+    }
+
 
 def analyze_titanic(filepath):
-    # Veri yükleme ve ön işleme
     df = pd.read_csv(filepath)
-    df.drop(columns=["PassengerId", "Name", "Ticket", "Cabin"], inplace=True)
-    df["Sex"] = df["Sex"].map({"male": 0, "female": 1})
-    df["Embarked"].fillna(df["Embarked"].mode()[0], inplace=True)
-    df["Embarked"] = LabelEncoder().fit_transform(df["Embarked"])
-    df["Age"].fillna(df["Age"].median(), inplace=True)
-    df["Fare"].fillna(df["Fare"].median(), inplace=True)
+    X, y = preprocess_titanic(df)
 
-    X = df.drop(columns=["Survived"])
-    y = df["Survived"]
+    ratios = [0.01,0.05,0.1, 0.2,0.4,0.6, 1.0]
+    results = []
 
-    # %10 etiketli, %90 etiketsiz ayrımı
-    X_labeled, X_unlabeled, y_labeled, y_unlabeled = train_test_split(
-        X, y, test_size=0.8, stratify=y, random_state=42)
+    for ratio in ratios:
+        result = run_experiment(X, y, label_ratio=ratio)
+        results.append(result)
 
-    y_unlabeled = y_unlabeled.copy()
-    y_unlabeled[:] = -1
+    # Results to DataFrame
+    results_df = pd.DataFrame(results)
 
-    X_combined = pd.concat([X_labeled, X_unlabeled])
-    y_combined = pd.concat([y_labeled, y_unlabeled])
-
-    # Test seti (%40)
-    X_train_rest, X_test, y_train_rest, y_test = train_test_split(
-        X, y, test_size=0.4, stratify=y, random_state=42)
-
-    # Supervised modeller
-    supervised_models = {
-        "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
-        "Random Forest": RandomForestClassifier(random_state=42),
-        "SVM": SVC(probability=True, random_state=42)
-    }
-
-    supervised_accuracies = {}
-    best_supervised_acc = 0
-    best_supervised_model = None
-
-    for name, model in supervised_models.items():
-        model.fit(X_labeled, y_labeled)
-        y_pred = model.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        # 0.01 - 0.05 arası rastgele gürültü çıkar
-        noise = random.uniform(0.01, 0.05)
-        acc_modified = max(0, acc - noise)
-        supervised_accuracies[name] = acc_modified
-
-        if acc_modified > best_supervised_acc:
-            best_supervised_acc = acc_modified
-            best_supervised_model = (name, model)
-
-    # Semi-supervised modeller
-    semi_supervised_models = {
-        "SelfTraining Logistic Regression": SelfTrainingClassifier(LogisticRegression(max_iter=1000, random_state=42)),
-        "SelfTraining Random Forest": SelfTrainingClassifier(RandomForestClassifier(random_state=42)),
-        "SelfTraining SVM": SelfTrainingClassifier(SVC(probability=True, random_state=42))
-    }
-
-    semi_accuracies = {}
-    best_semi_acc = 0
-    best_semi_model = None
-
-    for name, model in semi_supervised_models.items():
-        model.fit(X_combined, y_combined)
-        y_pred = model.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        semi_accuracies[name] = acc
-
-        if acc > best_semi_acc:
-            best_semi_acc = acc
-            best_semi_model = (name, model)
-
-    # Plot klasörü oluştur
-    os.makedirs('./static/plots', exist_ok=True)
-
-    # Supervised accuracy barplot
-    plt.figure(figsize=(10,6))
-    sns.barplot(x=list(supervised_accuracies.keys()), y=list(supervised_accuracies.values()), palette='husl')
+    # 📈 Plot Accuracy
+    plt.figure(figsize=(8,5))
+    plt.plot(results_df['label_ratio']*100, results_df['supervised_acc'], 'o-b', label='Supervised')
+    plt.plot(results_df['label_ratio']*100, results_df['semi_acc'], 'o-g', label='Semi-Supervised')
+    plt.xlabel("Etiketli Veri Oranı (%)")
     plt.ylabel("Accuracy")
-    plt.title("Supervised Model Performans Karşılaştırması (Modified Accuracy)")
-    plt.ylim(0, 1)
-    plt.xticks(rotation=45)
-    supervised_plot_path = './static/plots/supervised_titanic.png'
-    plt.savefig(supervised_plot_path)
+    plt.title("Accuracy vs Etiketli Veri Oranı")
+    plt.legend()
+    acc_plot_path = './uploads/titanic_accuracy_plot.png'
+    plt.savefig(acc_plot_path)
     plt.close()
 
-    # En iyi supervised model confusion matrix
-    y_pred_best_supervised = best_supervised_model[1].predict(X_test)
-    cm_sup = confusion_matrix(y_test, y_pred_best_supervised)
-    disp_sup = ConfusionMatrixDisplay(confusion_matrix=cm_sup)
-    disp_sup.plot(cmap=plt.cm.Blues)
-    plt.title(f"{best_supervised_model[0]} - Confusion Matrix")
-    cm_supervised_path = './static/plots/supervised_cm_titanic.png'
-    plt.savefig(cm_supervised_path)
+    # 📈 Plot F1 Score
+    plt.figure(figsize=(8,5))
+    plt.plot(results_df['label_ratio']*100, results_df['supervised_f1'], 'o-b', label='Supervised')
+    plt.plot(results_df['label_ratio']*100, results_df['semi_f1'], 'o-g', label='Semi-Supervised')
+    plt.xlabel("Etiketli Veri Oranı (%)")
+    plt.ylabel("F1 Score")
+    plt.title("F1 Score vs Etiketli Veri Oranı")
+    plt.legend()
+    f1_plot_path = './uploads/titanic_f1_plot.png'
+    plt.savefig(f1_plot_path)
     plt.close()
 
-    # Semi-supervised accuracy barplot
-    plt.figure(figsize=(10,6))
-    sns.barplot(x=list(semi_accuracies.keys()), y=list(semi_accuracies.values()), palette='pastel')
-    plt.ylabel("Accuracy")
-    plt.title("Semi-Supervised Model Performansları")
-    plt.ylim(0, 1)
-    plt.xticks(rotation=45)
-    semi_plot_path = './static/plots/semi_titanic.png'
-    plt.savefig(semi_plot_path)
-    plt.close()
-
-    # En iyi semi-supervised model confusion matrix
-    y_pred_best_semi = best_semi_model[1].predict(X_test)
-    cm_semi = confusion_matrix(y_test, y_pred_best_semi)
-    disp_semi = ConfusionMatrixDisplay(confusion_matrix=cm_semi)
-    disp_semi.plot(cmap=plt.cm.Purples)
-    plt.title(f"{best_semi_model[0]} - Confusion Matrix")
-    cm_semi_path = './static/plots/semi_cm_titanic.png'
-    plt.savefig(cm_semi_path)
-    plt.close()
-
-    # Final karşılaştırma plotu
-    final_comparison = {
-        f"Supervised - {best_supervised_model[0]}": best_supervised_acc,
-        f"Semi-Supervised - {best_semi_model[0]}": best_semi_acc
-    }
 
     plt.figure(figsize=(8,5))
-    sns.barplot(x=list(final_comparison.keys()), y=list(final_comparison.values()), palette='Set2')
-    plt.ylabel("Accuracy")
-    plt.title("Final Model Karşılaştırması")
-    plt.ylim(0, 1)
-    final_path = './static/plots/final_titanic.png'
-    plt.savefig(final_path)
+    plt.plot(results_df['label_ratio']*100, results_df['supervised_prec'], 'o-b', label='Supervised')
+    plt.plot(results_df['label_ratio']*100, results_df['semi_prec'], 'o-g', label='Semi-Supervised')
+    plt.xlabel("Etiketli Veri Oranı (%)")
+    plt.ylabel("Precision")
+    plt.title("Precision vs Etiketli Veri Oranı")
+    plt.legend()
+    plt.savefig('./uploads/titanic_precision_plot.png')
+    plt.close()
+    
+    plt.figure(figsize=(8,5))
+    plt.plot(results_df['label_ratio'] * 100, results_df['supervised_recall'], 'o-b', label='Supervised')
+    plt.plot(results_df['label_ratio'] * 100, results_df['semi_recall'], 'o-g', label='Semi-Supervised')
+    plt.xlabel("Etiketli Veri Oranı (%)")
+    plt.ylabel("Recall")
+    plt.title("Recall vs Etiketli Veri Oranı")
+    plt.legend()
+    recall_plot_path = './uploads/titanic_recall_plot.png'
+    plt.savefig(recall_plot_path)
     plt.close()
 
-    # Sonuçlar
-    return [
-        supervised_plot_path,
-        cm_supervised_path,
-        semi_plot_path,
-        cm_semi_path,
-        final_path
-    ]
+    return [acc_plot_path, f1_plot_path]

@@ -6,18 +6,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [plotPaths, setPlotPaths] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [error, setError] = useState(null);
-
-  const nextImage = () => {
-    setCurrentImageIndex((prev) => (prev + 1) % plotPaths.length);
-  };
-
-  const previousImage = () => {
-    setCurrentImageIndex(
-      (prev) => (prev - 1 + plotPaths.length) % plotPaths.length
-    );
-  };
 
   const handleFileChange = (e) => {
     setSelectedFile(e.target.files[0]);
@@ -34,7 +23,6 @@ function App() {
     setLoading(true);
     setError(null);
     setPlotPaths([]);
-    setCurrentImageIndex(0);
 
     const formData = new FormData();
     formData.append("file", selectedFile);
@@ -65,12 +53,13 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 font-sans">
-      <div className="h-screen flex flex-col">
+      <div className="min-h-screen flex flex-col">
+        {" "}
+        {/* Changed from h-screen to min-h-screen */}
         <h1 className="text-4xl font-medium text-gray-800 py-6 text-center animate-fade-in bg-white/50 backdrop-blur-sm sticky top-0 z-10 border-b border-gray-200/50">
           Supervised vs Semi-Supervised Learning
         </h1>
-
-        <div className="flex-1 flex flex-col md:flex-row gap-6 p-6 lg:p-8 overflow-hidden">
+        <div className="flex-1 flex flex-col md:flex-row gap-6 p-6 lg:p-8">
           {/* File Upload Panel */}
           <div className="w-full md:w-1/3 space-y-6 bg-white rounded-2xl p-8 shadow-soft animate-slide-up">
             <label className="block text-sm font-medium text-gray-700 mb-3">
@@ -93,64 +82,70 @@ function App() {
           </div>
 
           {/* Results Panel */}
-          <div className="w-full md:w-2/3 flex-1 overflow-hidden">
-            <div className="bg-white rounded-2xl p-8 shadow-soft h-full animate-slide-up">
+          <div className="w-full md:w-2/3 flex-1">
+            <div className="bg-white rounded-2xl p-8 shadow-soft animate-slide-up">
               <h2 className="text-2xl font-medium text-gray-800 mb-6 text-center">
                 Analysis Results
               </h2>
 
               {plotPaths.length > 0 && (
-                <>
-                  <div className="flex justify-between items-center mb-6">
-                    <button
-                      onClick={previousImage}
-                      className="p-3 hover:bg-gray-100 rounded-full"
-                    >
-                      <svg
-                        className="w-6 h-6 text-gray-600"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 19l-7-7 7-7"
-                        />
-                      </svg>
-                    </button>
-                    <span className="text-gray-600 text-sm">
-                      {currentImageIndex + 1} / {plotPaths.length}
-                    </span>
-                    <button
-                      onClick={nextImage}
-                      className="p-3 hover:bg-gray-100 rounded-full"
-                    >
-                      <svg
-                        className="w-6 h-6 text-gray-600"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 5l7 7-7 7"
-                        />
-                      </svg>
-                    </button>
+                <div className="space-y-8">
+                  {/* Supervised Learning Section */}
+                  <div>
+                    <h3 className="text-xl font-medium text-gray-700 mb-4 border-b pb-2">
+                      Supervised Learning Analysis
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {plotPaths.slice(0, 2).map((path, index) => (
+                        <div
+                          key={index}
+                          className="bg-gray-50 rounded-xl p-4 overflow-hidden"
+                        >
+                          <img
+                            src={path}
+                            alt={`Supervised Plot ${index + 1}`}
+                            className="w-full h-auto object-contain"
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="h-[400px] flex flex-col items-center justify-center bg-gray-50 rounded-xl overflow-hidden">
-                    <img
-                      src={plotPaths[currentImageIndex]}
-                      alt={`Plot ${currentImageIndex + 1}`}
-                      className="max-h-full max-w-full object-contain transition-all duration-500"
-                    />
+                  {/* Semi-Supervised Learning Section */}
+                  <div>
+                    <h3 className="text-xl font-medium text-gray-700 mb-4 border-b pb-2">
+                      Semi-Supervised Learning Analysis
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {plotPaths.slice(2, 4).map((path, index) => (
+                        <div
+                          key={index + 2}
+                          className="bg-gray-50 rounded-xl p-4 overflow-hidden"
+                        >
+                          <img
+                            src={path}
+                            alt={`Semi-Supervised Plot ${index + 1}`}
+                            className="w-full h-auto object-contain"
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </>
+
+                  {/* Final Comparison Section */}
+                  <div>
+                    <h3 className="text-xl font-medium text-gray-700 mb-4 border-b pb-2">
+                      Final Comparison
+                    </h3>
+                    <div className="bg-gray-50 rounded-xl p-4 overflow-hidden">
+                      <img
+                        src={plotPaths[4]}
+                        alt="Final Comparison"
+                        className="w-full h-auto object-contain"
+                      />
+                    </div>
+                  </div>
+                </div>
               )}
 
               {!plotPaths.length && !loading && (
