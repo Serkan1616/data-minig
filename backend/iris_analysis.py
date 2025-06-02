@@ -1,123 +1,156 @@
 # iris_analysis.py
 
+import matplotlib
+matplotlib.use('Agg')
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 import os
+from sklearn.metrics import recall_score, precision_score, accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.preprocessing import LabelEncoder
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.semi_supervised import SelfTrainingClassifier, LabelPropagation, LabelSpreading
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.semi_supervised import SelfTrainingClassifier
+
+def preprocess_iris(df):
+    df = df.drop('Id', axis=1)
+    X = df.drop('Species', axis=1)
+    y = LabelEncoder().fit_transform(df['Species'])
+    return X, y
+
+def run_experiment(X, y, label_ratio):
+    if label_ratio < 1.0:
+        X_labeled, X_unlabeled, y_labeled, y_unlabeled = train_test_split(
+            X, y, train_size=label_ratio, stratify=y, random_state=42
+        )
+        # NumPy array'leri pandas Series'e dönüştür
+        y_labeled = pd.Series(y_labeled)
+        y_unlabeled = pd.Series(y_unlabeled)
+        
+        X_train_full = pd.concat([X_labeled, X_unlabeled])
+        y_train_full = pd.concat([y_labeled, y_unlabeled])
+    else:
+        X_labeled = X.copy()
+        y_labeled = y.copy()
+        X_train_full = X.copy()
+        y_train_full = pd.Series(y.copy())  # y'yi Series'e dönüştür
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_train_full, y_train_full, test_size=0.4, stratify=y_train_full, random_state=42
+    )
+
+    # Supervised model
+    clf_supervised = RandomForestClassifier(random_state=42)
+    clf_supervised.fit(X_labeled, y_labeled)
+    y_pred_supervised = clf_supervised.predict(X_test)
+
+    # Semi-supervised model
+    y_semi = y_train.copy()
+    if label_ratio < 1.0:
+        y_semi.iloc[len(X_labeled):] = -1
+
+    base_model = RandomForestClassifier(random_state=42)
+    semi_clf = SelfTrainingClassifier(base_model)
+    semi_clf.fit(X_train, y_semi)
+    y_pred_semi = semi_clf.predict(X_test)
+
+    # Metrics
+    supervised_f1 = f1_score(y_test, y_pred_supervised, average='macro')
+    semi_f1 = f1_score(y_test, y_pred_semi, average='macro')
+    supervised_acc = accuracy_score(y_test, y_pred_supervised)
+    semi_acc = accuracy_score(y_test, y_pred_semi)
+    supervised_prec = precision_score(y_test, y_pred_supervised, average='macro')
+    semi_prec = precision_score(y_test, y_pred_semi, average='macro')
+    supervised_recall = recall_score(y_test, y_pred_supervised, average='macro')
+    semi_recall = recall_score(y_test, y_pred_semi, average='macro')
+
+    return {
+        'label_ratio': label_ratio,
+        'supervised_f1': supervised_f1,
+        'semi_f1': semi_f1,
+        'supervised_acc': supervised_acc,
+        'semi_acc': semi_acc,
+        'supervised_prec': supervised_prec,
+        'semi_prec': semi_prec,
+        'supervised_recall': supervised_recall,
+        'semi_recall': semi_recall
+    }
 
 def analyze_iris(filepath):
-    data = pd.read_csv(filepath)
-    X = data.drop(['Id', 'Species'], axis=1)
-    y = LabelEncoder().fit_transform(data['Species'])
+    plt.close('all')
+    
+    df = pd.read_csv(filepath)
+    X, y = preprocess_iris(df)
+    
+    # Cleanup old plots
+    for plot_file in ['iris_accuracy_plot.png', 'iris_f1_plot.png', 
+                     'iris_precision_plot.png', 'iris_recall_plot.png']:
+        try:
+            os.remove(os.path.join('./uploads', plot_file))
+        except:
+            pass
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.4, random_state=42, stratify=y)
+    # Iris için minimum ratio değerini artırıyoruz (her sınıf için en az 2 örnek gerekiyor)
+    ratios = [0.1, 0.2, 0.3, 0.4, 0.6, 0.8, 1.0]  # 0.01 ve 0.05'i kaldırdık
+    results = []
 
-    models = {
-        "KNN": KNeighborsClassifier(n_neighbors=5),
-        "Logistic Regression": LogisticRegression(max_iter=200),
-        "SVM": SVC(),
-        "Decision Tree": DecisionTreeClassifier(),
-        "Random Forest": RandomForestClassifier(),
-        "Gradient Boosting": GradientBoostingClassifier()
-    }
+    for ratio in ratios:
+        result = run_experiment(X, y, label_ratio=ratio)
+        results.append(result)
 
-    accuracies = {}
-    for name, model in models.items():
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
-        accuracies[name] = accuracy_score(y_test, y_pred)
+    results_df = pd.DataFrame(results)
 
-    os.makedirs('./static/plots', exist_ok=True)
-
-    plt.figure(figsize=(10,6))
-    sns.barplot(x=list(accuracies.keys()), y=list(accuracies.values()), palette='husl')
-    plt.ylabel("Accuracy")
-    plt.title("Supervised Model Performans Karşılaştırması")
-    plt.xticks(rotation=45)
-    plt.ylim(0.8, 1.0)
-    supervised_plot_path = './static/plots/supervised.png'
-    plt.savefig(supervised_plot_path)
-    plt.close()
-
-    best_model_name = max(accuracies, key=accuracies.get)
-    best_model = models[best_model_name]
-    y_pred_best = best_model.predict(X_test)
-
-    cm = confusion_matrix(y_test, y_pred_best)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    disp.plot(cmap=plt.cm.Blues)
-    plt.title(f"{best_model_name} - Confusion Matrix")
-    cm_supervised_path = './static/plots/supervised_cm.png'
-    plt.savefig(cm_supervised_path)
-    plt.close()
-
-    y_train_semi = np.copy(y_train)
-    rng = np.random.RandomState(42)
-    n_labeled = int(0.3 * len(y_train_semi))
-    y_train_semi[rng.choice(len(y_train_semi), len(y_train_semi) - n_labeled, replace=False)] = -1
-
-    semi_models = {
-        "Self-Training (KNN)": SelfTrainingClassifier(KNeighborsClassifier(n_neighbors=5)),
-        "Label Propagation": LabelPropagation(),
-        "Label Spreading": LabelSpreading()
-    }
-
-    semi_accuracies = {}
-    for name, model in semi_models.items():
-        model.fit(X_train, y_train_semi)
-        y_pred = model.predict(X_test)
-        semi_accuracies[name] = accuracy_score(y_test, y_pred)
-
-    plt.figure(figsize=(10,6))
-    sns.barplot(x=list(semi_accuracies.keys()), y=list(semi_accuracies.values()), palette='pastel')
-    plt.ylabel("Accuracy")
-    plt.title("Semi-Supervised Model Performansları")
-    plt.xticks(rotation=45)
-    plt.ylim(0.8, 1.0)
-    semi_plot_path = './static/plots/semi.png'
-    plt.savefig(semi_plot_path)
-    plt.close()
-
-    best_semi_model_name = max(semi_accuracies, key=semi_accuracies.get)
-    best_semi_model = semi_models[best_semi_model_name]
-    y_pred_semi = best_semi_model.predict(X_test)
-
-    cm = confusion_matrix(y_test, y_pred_semi)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    disp.plot(cmap=plt.cm.Purples)
-    plt.title(f"{best_semi_model_name} - Confusion Matrix")
-    cm_semi_path = './static/plots/semi_cm.png'
-    plt.savefig(cm_semi_path)
-    plt.close()
-
-    final_comparison = {
-        f"Supervised - {best_model_name}": accuracies[best_model_name],
-        f"Semi-Supervised - {best_semi_model_name}": semi_accuracies[best_semi_model_name]
-    }
-
+    # Plot Accuracy
     plt.figure(figsize=(8,5))
-    sns.barplot(x=list(final_comparison.keys()), y=list(final_comparison.values()), palette='Set2')
+    plt.plot(results_df['label_ratio']*100, results_df['supervised_acc'], 'o-b', label='Supervised')
+    plt.plot(results_df['label_ratio']*100, results_df['semi_acc'], 'o-g', label='Semi-Supervised')
+    plt.xlabel("Etiketli Veri Oranı (%)")
     plt.ylabel("Accuracy")
-    plt.title("Final Karşılaştırma")
-    plt.ylim(0.8, 1.0)
-    final_path = './static/plots/final.png'
-    plt.savefig(final_path)
+    plt.title("Accuracy vs Etiketli Veri Oranı")
+    plt.legend()
+    acc_plot_path = './uploads/iris_accuracy_plot.png'
+    plt.savefig(acc_plot_path)
+    plt.close()
+
+    # Plot F1 Score
+    plt.figure(figsize=(8,5))
+    plt.plot(results_df['label_ratio']*100, results_df['supervised_f1'], 'o-b', label='Supervised')
+    plt.plot(results_df['label_ratio']*100, results_df['semi_f1'], 'o-g', label='Semi-Supervised')
+    plt.xlabel("Etiketli Veri Oranı (%)")
+    plt.ylabel("F1 Score")
+    plt.title("F1 Score vs Etiketli Veri Oranı")
+    plt.legend()
+    f1_plot_path = './uploads/iris_f1_plot.png'
+    plt.savefig(f1_plot_path)
+    plt.close()
+
+    # Plot Precision
+    plt.figure(figsize=(8,5))
+    plt.plot(results_df['label_ratio']*100, results_df['supervised_prec'], 'o-b', label='Supervised')
+    plt.plot(results_df['label_ratio']*100, results_df['semi_prec'], 'o-g', label='Semi-Supervised')
+    plt.xlabel("Etiketli Veri Oranı (%)")
+    plt.ylabel("Precision")
+    plt.title("Precision vs Etiketli Veri Oranı")
+    plt.legend()
+    precision_plot_path = './uploads/iris_precision_plot.png'
+    plt.savefig(precision_plot_path)
+    plt.close()
+
+    # Plot Recall
+    plt.figure(figsize=(8,5))
+    plt.plot(results_df['label_ratio']*100, results_df['supervised_recall'], 'o-b', label='Supervised')
+    plt.plot(results_df['label_ratio']*100, results_df['semi_recall'], 'o-g', label='Semi-Supervised')
+    plt.xlabel("Etiketli Veri Oranı (%)")
+    plt.ylabel("Recall")
+    plt.title("Recall vs Etiketli Veri Oranı")
+    plt.legend()
+    recall_plot_path = './uploads/iris_recall_plot.png'
+    plt.savefig(recall_plot_path)
     plt.close()
 
     return [
-        supervised_plot_path,
-        cm_supervised_path,
-        semi_plot_path,
-        cm_semi_path,
-        final_path
+        acc_plot_path,
+        f1_plot_path,
+        precision_plot_path,
+        recall_plot_path
     ]
